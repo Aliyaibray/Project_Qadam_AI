@@ -17,7 +17,7 @@ from pypdf import PdfReader
 
 APP_NAME = "Qadam AI"
 VACANCIES_FILE = os.path.join(os.path.dirname(__file__), "vacancies.json")
-MODEL_CANDIDATES = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash"]
+MODEL_CANDIDATES = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"]
 INTERVIEW_QUESTIONS = 5
 MAX_INPUT_CHARS = 15000
 
