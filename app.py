@@ -193,8 +193,8 @@ def get_api_key():
 
 @st.cache_resource
 def get_client(api_key):
-    # Таймаут 90 секунд, чтобы запрос не "висел" бесконечно
-    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=90_000))
+    # Таймаут 45 секунд, чтобы запрос не "висел" бесконечно
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=45_000))
 
 
 def ask_gemini(prompt, system, as_json=True):
@@ -224,7 +224,10 @@ def ask_gemini(prompt, system, as_json=True):
                 return parse_json(text) if as_json else text
             except Exception as e:  # модель недоступна или режим не поддерживается
                 errors.append(f"{model}: {type(e).__name__}: {e}")
-                if "404" in str(e) or "NOT_FOUND" in str(e):
+                msg = str(e).lower()
+                if "timed out" in msg or "timeout" in type(e).__name__.lower():
+                    raise RuntimeError("Timeout: Gemini не ответил за 45 секунд.\n\n" + "\n\n".join(errors))
+                if "404" in msg or "not_found" in msg:
                     break  # модели нет — сразу пробуем следующую
     raise RuntimeError("\n\n".join(errors))
 
