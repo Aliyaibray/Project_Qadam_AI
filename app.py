@@ -17,7 +17,7 @@ from pypdf import PdfReader
 
 APP_NAME = "Qadam AI"
 VACANCIES_FILE = os.path.join(os.path.dirname(__file__), "vacancies.json")
-MODEL_CANDIDATES = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+MODEL_CANDIDATES = ["gemini-3.8-flash-lite", "gemini-3.8-flash"]
 INTERVIEW_QUESTIONS = 5
 MAX_INPUT_CHARS = 15000
 
@@ -197,14 +197,41 @@ def get_client(api_key):
     return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=45_000))
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def discover_models(api_key):
+    """Список текстовых моделей Gemini, доступных этому ключу: сначала flash-lite и flash, затем pro."""
+    try:
+        names = []
+        for m in get_client(api_key).models.list():
+            name = (m.name or "").replace("models/", "")
+            actions = m.supported_actions or []
+            if "gemini" not in name or (actions and "generateContent" not in actions):
+                continue
+            if any(x in name for x in ("embed", "image", "tts", "audio", "live", "vision", "robotics", "computer")):
+                continue
+            names.append(name)
+    except Exception:
+        return []
+
+    def rank(n):
+        tier = 0 if "lite" in n else 1 if "flash" in n else 2 if "pro" in n else 3
+        nums = re.findall(r"\d+(?:\.\d+)?", n)
+        version = float(nums[0]) if nums else 0.0
+        return (tier, -version, "preview" in n or "exp" in n, n)
+
+    return sorted(set(names), key=rank)
+
+
 def ask_gemini(prompt, system, as_json=True):
-    """Отправляет запрос в Gemini, перебирая модели, если какая-то недоступна."""
-    client = get_client(get_api_key())
+    """Отправляет запрос в Gemini. Если модель перегружена (503) или недоступна (404),
+    автоматически пробует следующую доступную модель."""
+    api_key = get_api_key()
+    client = get_client(api_key)
     try:
         custom = st.secrets.get("GEMINI_MODEL")
     except Exception:
         custom = None
-    models = list(dict.fromkeys(([custom] if custom else []) + MODEL_CANDIDATES))
+    models = list(dict.fromkeys(([custom] if custom else []) + MODEL_CANDIDATES + discover_models(api_key)))[:8]
     base = dict(
         system_instruction=system + "\n" + SAFETY_RULE,
         temperature=0.4,
@@ -227,8 +254,8 @@ def ask_gemini(prompt, system, as_json=True):
                 msg = str(e).lower()
                 if "timed out" in msg or "timeout" in type(e).__name__.lower():
                     raise RuntimeError("Timeout: Gemini не ответил за 45 секунд.\n\n" + "\n\n".join(errors))
-                if "404" in msg or "not_found" in msg:
-                    break  # модели нет — сразу пробуем следующую
+                if any(x in msg for x in ("404", "not_found", "503", "unavailable", "429", "resource_exhausted")):
+                    break  # модели нет или она перегружена — сразу пробуем следующую
     raise RuntimeError("\n\n".join(errors))
 
 
