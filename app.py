@@ -193,7 +193,8 @@ def get_api_key():
 
 @st.cache_resource
 def get_client(api_key):
-    return genai.Client(api_key=api_key)
+    # Таймаут 90 секунд, чтобы запрос не "висел" бесконечно
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=90_000))
 
 
 def ask_gemini(prompt, system, as_json=True):
@@ -203,21 +204,28 @@ def ask_gemini(prompt, system, as_json=True):
         custom = st.secrets.get("GEMINI_MODEL")
     except Exception:
         custom = None
-    models = ([custom] if custom else []) + MODEL_CANDIDATES
-    config = types.GenerateContentConfig(
+    models = list(dict.fromkeys(([custom] if custom else []) + MODEL_CANDIDATES))
+    base = dict(
         system_instruction=system + "\n" + SAFETY_RULE,
         temperature=0.4,
         response_mime_type="application/json" if as_json else "text/plain",
     )
+    # Сначала быстрый режим (минимум "размышлений" модели), затем обычный
+    configs = [
+        types.GenerateContentConfig(**base, thinking_config=types.ThinkingConfig(thinking_level="LOW")),
+        types.GenerateContentConfig(**base),
+    ]
     errors = []
     for model in models:
-        try:
-            resp = client.models.generate_content(model=model, contents=prompt, config=config)
-            text = resp.text or ""
-            return parse_json(text) if as_json else text
-        except Exception as e:  # модель недоступна или временная ошибка
-            errors.append(f"{model}: {type(e).__name__}: {e}")
-            continue
+        for config in configs:
+            try:
+                resp = client.models.generate_content(model=model, contents=prompt, config=config)
+                text = resp.text or ""
+                return parse_json(text) if as_json else text
+            except Exception as e:  # модель недоступна или режим не поддерживается
+                errors.append(f"{model}: {type(e).__name__}: {e}")
+                if "404" in str(e) or "NOT_FOUND" in str(e):
+                    break  # модели нет — сразу пробуем следующую
     raise RuntimeError("\n\n".join(errors))
 
 
@@ -442,8 +450,9 @@ with tab1:
         except Exception as e:
             text = ""
             show_error(e)
-        if not text:
-            st.warning(tr["need_input"])
+        if len(text) < 20:
+            # Пустой текст: файл не выбран или PDF — это картинка (скан)
+            st.warning(tr["need_input"] + " (PDF → text?)")
         else:
             with st.spinner(tr["analyzing"]):
                 try:
