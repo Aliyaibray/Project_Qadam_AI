@@ -27,6 +27,14 @@ MAX_INPUT_CHARS = 15000
 T = {
     "kk": {
         "lang_name": "Қазақша",
+        "role": "Кім ретінде кіресіз?",
+        "role_student": "🎓 Студент",
+        "role_partner": "🏢 Мансап орталығы / Жұмыс беруші",
+        "partner_sub": "Мансап орталығы мен серіктес компанияларға арналған кабинет",
+        "password": "Кіру құпиясөзі",
+        "wrong_pw": "Құпиясөз қате.",
+        "demo_open": "Демо-режим: құпиясөз орнатылмаған, кабинет ашық.",
+        "tab_base": "Вакансиялар базасы",
         "subtitle": "ЕҰУ білім алушыларына арналған ЖИ-мансап көмекшісі",
         "tab_profile": "1. Профиль",
         "tab_match": "2. Тағылымдамалар",
@@ -75,6 +83,14 @@ T = {
     },
     "ru": {
         "lang_name": "Русский",
+        "role": "Кто вы?",
+        "role_student": "🎓 Студент",
+        "role_partner": "🏢 Карьерный центр / Работодатель",
+        "partner_sub": "Кабинет карьерного центра и компаний-партнёров",
+        "password": "Пароль для входа",
+        "wrong_pw": "Неверный пароль.",
+        "demo_open": "Демо-режим: пароль не задан, кабинет открыт.",
+        "tab_base": "База вакансий",
         "subtitle": "ИИ-карьерный помощник для студентов ЕНУ",
         "tab_profile": "1. Профиль",
         "tab_match": "2. Стажировки",
@@ -123,6 +139,14 @@ T = {
     },
     "en": {
         "lang_name": "English",
+        "role": "Who are you?",
+        "role_student": "🎓 Student",
+        "role_partner": "🏢 Career center / Employer",
+        "partner_sub": "Workspace for the career center and partner companies",
+        "password": "Login password",
+        "wrong_pw": "Wrong password.",
+        "demo_open": "Demo mode: no password set, workspace is open.",
+        "tab_base": "Vacancy database",
         "subtitle": "AI career assistant for ENU students",
         "tab_profile": "1. Profile",
         "tab_match": "2. Internships",
@@ -443,6 +467,9 @@ with st.sidebar:
         index=0,
     )
     tr = T[lang]
+    role = st.radio(tr["role"], options=["student", "partner"],
+                    format_func=lambda k: tr["role_student"] if k == "student" else tr["role_partner"])
+    st.divider()
     st.caption(tr["privacy"])
     st.caption(f"{tr['base_size']}: {len(load_vacancies())}")
 
@@ -467,7 +494,66 @@ def esc(s):
 def tags(items, cls="tag"):
     return " ".join(f'<span class="{cls}">{esc(i)}</span>' for i in items)
 
-tab1, tab2, tab3, tab4 = st.tabs([tr["tab_profile"], tr["tab_match"], tr["tab_interview"], tr["tab_add"]])
+# ===========================================================================
+# Кабинет карьерного центра / работодателя
+# ===========================================================================
+def get_admin_password():
+    try:
+        return st.secrets.get("ADMIN_PASSWORD")
+    except Exception:
+        return None
+
+
+if role == "partner":
+    st.subheader(tr["partner_sub"])
+    pw_required = get_admin_password()
+    if pw_required:
+        if not st.session_state.get("partner_ok"):
+            pw = st.text_input(tr["password"], type="password")
+            if pw:
+                if pw == pw_required:
+                    st.session_state.partner_ok = True
+                    st.rerun()
+                else:
+                    st.error(tr["wrong_pw"])
+            st.stop()
+    else:
+        st.caption(tr["demo_open"])
+
+    ptab1, ptab2 = st.tabs([tr["tab_add"], tr["tab_base"]])
+    with ptab1:
+        st.write(tr["add_intro"])
+        raw = st.text_area(tr["vac_text"], height=200)
+        if st.button(tr["parse"], type="primary") and raw.strip():
+            with st.spinner(tr["analyzing"]):
+                try:
+                    vacs = load_vacancies()
+                    new = parse_vacancy(raw, f"u{len(vacs) + 1:02d}")
+                    vacs.append(new)
+                    st.success(tr["added"])
+                    st.json(new)
+                except Exception as e:
+                    show_error(e)
+    with ptab2:
+        st.caption(tr["demo_note"])
+        rows = [{"ID": v.get("id"), "Вакансия": v.get("title"), "Компания": v.get("company"),
+                 "Город": v.get("city"), "Сфера": v.get("field"), "Формат": v.get("format"),
+                 "Навыки": ", ".join(v.get("skills", []))} for v in load_vacancies()]
+        st.dataframe(rows, width="stretch", hide_index=True)
+        st.download_button(
+            tr["download"],
+            data=json.dumps(load_vacancies(), ensure_ascii=False, indent=2),
+            file_name="vacancies.json",
+            mime="application/json",
+        )
+    st.divider()
+    st.caption(f"{APP_NAME} · Google Gemini · Streamlit · «ЖИ-әзірлемелер» байқауы, ЕҰУ, 2026")
+    st.stop()
+
+# ===========================================================================
+# Интерфейс студента
+# ===========================================================================
+tab1, tab2, tab3 = st.tabs([tr["tab_profile"], tr["tab_match"], tr["tab_interview"]])
 
 # --- 1. Профиль -------------------------------------------------------------
 with tab1:
@@ -611,27 +697,6 @@ with tab3:
                         st.markdown(f"- {s}")
                 if f.get("example_answer"):
                     st.info(f.get("example_answer"))
-
-# --- 4. Добавить вакансию (для карьерного центра) ----------------------------
-with tab4:
-    st.write(tr["add_intro"])
-    raw = st.text_area(tr["vac_text"], height=200)
-    if st.button(tr["parse"], type="primary") and raw.strip():
-        with st.spinner(tr["analyzing"]):
-            try:
-                vacs = load_vacancies()
-                new = parse_vacancy(raw, f"u{len(vacs) + 1:02d}")
-                vacs.append(new)
-                st.success(tr["added"])
-                st.json(new)
-            except Exception as e:
-                show_error(e)
-    st.download_button(
-        tr["download"],
-        data=json.dumps(load_vacancies(), ensure_ascii=False, indent=2),
-        file_name="vacancies.json",
-        mime="application/json",
-    )
 
 st.divider()
 st.caption(f"{APP_NAME} · Google Gemini · Streamlit · «ЖИ-әзірлемелер» байқауы, ЕҰУ, 2026")
