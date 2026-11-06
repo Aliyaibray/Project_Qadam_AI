@@ -209,16 +209,16 @@ def ask_gemini(prompt, system, as_json=True):
         temperature=0.4,
         response_mime_type="application/json" if as_json else "text/plain",
     )
-    last_error = None
+    errors = []
     for model in models:
         try:
             resp = client.models.generate_content(model=model, contents=prompt, config=config)
             text = resp.text or ""
             return parse_json(text) if as_json else text
         except Exception as e:  # модель недоступна или временная ошибка
-            last_error = e
+            errors.append(f"{model}: {type(e).__name__}: {e}")
             continue
-    raise RuntimeError(str(last_error))
+    raise RuntimeError("\n\n".join(errors))
 
 
 def parse_json(text):
@@ -416,6 +416,12 @@ if not get_api_key():
     st.stop()
 
 
+def show_error(e):
+    st.error(tr["error"])
+    with st.expander("Подробности ошибки / Details"):
+        st.code(str(e)[:3000])
+
+
 def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -431,7 +437,11 @@ with tab1:
     up = st.file_uploader(tr["upload"], type=["pdf", "txt"])
     pasted = st.text_area(tr["paste"], height=150)
     if st.button(tr["analyze"], type="primary"):
-        text = (read_upload(up) + "\n" + pasted).strip()
+        try:
+            text = (read_upload(up) + "\n" + pasted).strip()
+        except Exception as e:
+            text = ""
+            show_error(e)
         if not text:
             st.warning(tr["need_input"])
         else:
@@ -439,8 +449,8 @@ with tab1:
                 try:
                     st.session_state.profile = analyze_profile(text, lang)
                     st.session_state.pop("matches", None)
-                except Exception:
-                    st.error(tr["error"])
+                except Exception as e:
+                    show_error(e)
 
     p = st.session_state.get("profile")
     if p:
@@ -472,8 +482,8 @@ with tab2:
             with st.spinner(tr["matching"]):
                 try:
                     st.session_state.matches = match_vacancies(st.session_state.profile, load_vacancies(), lang)
-                except Exception:
-                    st.error(tr["error"])
+                except Exception as e:
+                    show_error(e)
         res = st.session_state.get("matches")
         if res:
             by_id = {v["id"]: v for v in load_vacancies()}
@@ -511,8 +521,8 @@ with tab3:
                 try:
                     r = interview_turn(st.session_state.profile, choice, [], lang)
                     st.session_state.iv["pending_q"] = r.get("next_question")
-                except Exception:
-                    st.error(tr["error"])
+                except Exception as e:
+                    show_error(e)
         if c2.button(tr["restart"]):
             st.session_state.pop("iv", None)
             st.rerun()
@@ -543,8 +553,8 @@ with tab3:
                                 iv["pending_q"] = None
                                 hist = [{"q": h["q"], "a": h["a"]} for h in iv["history"]]
                                 iv["final"] = interview_final(st.session_state.profile, iv["vacancy"], hist, lang)
-                        except Exception:
-                            st.error(tr["error"])
+                        except Exception as e:
+                            show_error(e)
                     st.rerun()
 
             if iv.get("final"):
@@ -575,8 +585,8 @@ with tab4:
                 vacs.append(new)
                 st.success(tr["added"])
                 st.json(new)
-            except Exception:
-                st.error(tr["error"])
+            except Exception as e:
+                show_error(e)
     st.download_button(
         tr["download"],
         data=json.dumps(load_vacancies(), ensure_ascii=False, indent=2),
